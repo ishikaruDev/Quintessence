@@ -38,6 +38,7 @@
 - **Arena and duels**: the enemy team and your duel opponent go straight into your macro text. In a duel against a warlock, `SUCCUBUS` becomes their succubus's name.
 - **An editor** with syntax colouring, error marks, **Preview as** (try any game state in the editor) and a built-in guide with examples you can try.
 - **Quintessence Macros** (`/qmb`): a replacement for Blizzard's macro window, with a bank that keeps far more macros than the game's slots, account-wide, and **loadouts** that fill your macro slots, action bars and gear set for each spec.
+- **Key bindings** without macro slots: bind a key straight to a template or a bank macro (right-click its row). The key list shows every binding, and you can import your BindPad bindings. See the guide's Key bindings page.
 - **An API for other addons**: a WeakAura or a raid addon can switch flags and pin players (the guide's *Commands and other addons* page).
 
 Buttons can't change in combat, a limitation imposed by the game: a template picks its version before the fight, and anything that changes during it is applied when combat ends.
