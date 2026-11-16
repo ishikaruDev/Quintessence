@@ -1,0 +1,46 @@
+## Interface: 30300
+## Title: Quintessence
+## Notes: Conditional compiler for floating secure macros.
+## Author: Ishikaru
+## Version: 1.1.1
+## SavedVariables: WMacroCompilerDB, QuintessenceBankDB
+## OptionalDeps: !!!ClassicAPI
+
+#@no-lib-strip@
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.xml
+Libs\AceGUI-3.0\AceGUI-3.0.xml
+#@end-no-lib-strip@
+
+Core\Quintessence.lua
+Media\ThemeData.lua
+Core\Theme.lua
+Compiler\Compiler.lua
+Compiler\SpecData.lua
+Compiler\State.lua
+Compiler\Secure.lua
+Core\ListRow.lua
+Core\Widgets.lua
+Core\Controls.lua
+Core\TextArea.lua
+Core\Popups.lua
+Core\Tooltip.lua
+Core\IconPicker.lua
+Compiler\MuteDialog.lua
+Core\Send.lua
+Compiler\UI.lua
+Compiler\GuideData.lua
+Compiler\Guide.lua
+Core\MinimapButton.lua
+Compiler\Flyout.lua
+Compiler\API.lua
+Bank\Macros.lua
+Bank\Store.lua
+Bank\Loadouts.lua
+Bank\UI.lua
+Bank\Settings.lua
+Bank\Takeover.lua
+Core\Keys.lua
+Core\KeyPrompt.lua
+Core\KeyList.lua
+Bank\BindPad.lua
