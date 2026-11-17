@@ -654,7 +654,7 @@ function Menu:Refresh()
             row:Enable()
             row.label:SetTextColor(1, 1, 1)
         end
-        if self.isList and index == self.selected then
+        if self.isList and (index == self.selected or item.checked) then
             row.check:Show()
             row.current:Show()
         else
@@ -690,7 +690,8 @@ function Menu:Scroll(delta)
     self:SetOffset(self.offset + (delta or 0))
 end
 
--- items: { { text = "Rename...", func = fn, disabled = bool }, ... }
+-- items: { { text = "Rename...", func = fn, disabled = bool, checked = bool }, ... }
+--   (checked: a check mark and gold band, as `selected`, with opts.list)
 -- anchor: a frame (the menu opens under it), or nil for the cursor.
 -- opts (optional; a dropdown's list):
 --   width     the exact width (default: fit the widest item)

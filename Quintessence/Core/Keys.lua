@@ -55,6 +55,10 @@ AnyDown).
   Keys:Rehome(kind, oldId, newId, home) an item renamed (newId), moved to
                               a section (home: its class, nil: General) or
                               gone (newId nil)
+  Keys:Hand(kind, fromId, toId) its keys to another item, at each level
+                              where that one has none (a General item's
+                              ALL key goes to a class item's class) ->
+                              how many moved
   Keys:MacroDeleted(id)       a bank macro deleted: its keys and its button
 -------------------------------------------------------------------------------]]
 local Keys = {}
@@ -526,6 +530,46 @@ end
 
 -- (Store.lua's Bank:Delete, the record already gone.) Its button goes
 -- too, unless a slot still runs it as a long macro (Macros.db.long).
+function Keys:Hand(kind, fromId, toId)
+    local keys = db()
+    if not keys then
+        return 0
+    end
+    local home = homeOf(kind, toId)
+    local moves = {}
+    for level, atLevel in pairs(keys) do
+        for key, entry in pairs(atLevel) do
+            if same(entry, kind, fromId) then
+                local target = (home and level == "ALL") and home or level
+                if not home or target:match("^([^:]+)") == home then
+                    moves[#moves + 1] = { level = level, key = key, target = target }
+                end
+            end
+        end
+    end
+    local moved = 0
+    for _, move in ipairs(moves) do
+        local atTarget = keys[move.target] or {}
+        local taken = false
+        for key, entry in pairs(atTarget) do
+            if same(entry, kind, toId) or (key == move.key and not same(entry, kind, fromId)) then
+                taken = true
+            end
+        end
+        if not taken then
+            keys[move.level][move.key] = nil
+            keys[move.target] = atTarget
+            atTarget[move.key] = { kind = kind, id = toId }
+            moved = moved + 1
+        end
+    end
+    if moved > 0 then
+        self:Apply()
+        refreshLists()
+    end
+    return moved
+end
+
 function Keys:MacroDeleted(id)
     self:Rehome("macro", id, nil)
     local Macros = addon.Macros

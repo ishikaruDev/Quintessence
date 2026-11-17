@@ -40,7 +40,16 @@ first one made.
   Bank:SlotsOf(id)            -> the linked slots' indexes, both tabs
   Bank:SaveSlot(index, section, category) -> id, "saved" | "updated" |
                               "linked" (it already was); or nil, the error
-  Bank:SaveTab(tab, section, category) -> how many were saved or updated
+  Bank:HeldIn(macro, section, category) -> the id of the bank macro there
+                              that the slot already is, or nil
+  Bank:SaveCopy(index, section, category) -> as SaveSlot, but a slot linked
+                              to a bank macro elsewhere is copied there
+                              ("linked": it already is there). When the
+                              tab prefers the copy (see Links), it takes
+                              the keys and the slot.
+  Bank:SaveTab(tab, section, category) -> how many were saved or updated,
+                              nil, how many were already there; or nil,
+                              the error. Each slot as SaveCopy.
   Bank:Load(id, tab)          -> the slot's index; or nil and the error.
                               Into the tab's macro of that name, else a
                               free slot.
@@ -478,12 +487,13 @@ local function tabPlaces(tab)
     return places
 end
 
-function Bank:LinkOf(macro)
-    local ids = self:LinksOf(macro)
+-- Of identical bank macros, the one from the places the tab is filled
+-- from, else the first.
+local function preferred(tab, ids)
     if #ids < 2 then
         return ids[1]
     end
-    for _, place in ipairs(tabPlaces(macro.tab)) do
+    for _, place in ipairs(tabPlaces(tab)) do
         for _, id in ipairs(ids) do
             local record = db().macros[id]
             if record.section == place.section and categoryOf(record) == place.category then
@@ -492,6 +502,10 @@ function Bank:LinkOf(macro)
         end
     end
     return ids[1]
+end
+
+function Bank:LinkOf(macro)
+    return preferred(macro and macro.tab, self:LinksOf(macro))
 end
 
 local function linksTo(ids, id)
@@ -681,21 +695,102 @@ function Bank:SaveToLoaded(index)
     return id, result, place
 end
 
+-- The bank macro in that place that a slot already is: one it is linked
+-- to, or one of its name and text (a long slot links to one record only).
+function Bank:HeldIn(macro, section, category)
+    for _, id in ipairs(self:LinksOf(macro)) do
+        local record = db().macros[id]
+        if record.section == section and categoryOf(record) == category then
+            return id
+        end
+    end
+    for id, record in pairs(db().macros) do
+        if record.section == section and categoryOf(record) == category and record.name == macro.name
+            and record.text == macro.text then
+            return id
+        end
+    end
+    return nil
+end
+
+-- A bank macro copied into another place: its namesake there is updated,
+-- else a new one is added (a slot linked to it is then linked to both).
+local function copyInto(id, section, category)
+    local source = db().macros[id]
+    local existing
+    for otherId, record in pairs(db().macros) do
+        if record.section == section and categoryOf(record) == category and record.name == source.name
+            and (not existing or otherId < existing) then
+            existing = otherId
+        end
+    end
+    if not existing then
+        local newId, addError = Bank:Add(section, category, source.name, source.icon, source.text)
+        if not newId then
+            return nil, addError
+        end
+        return newId, "saved"
+    end
+    local record = db().macros[existing]
+    record.text, record.icon = source.text, source.icon
+    if #record.text > Macros.BODY_MAX then
+        record.button = true
+    end
+    if record.button then
+        Macros.ApplyButton(existing)
+    end
+    changed()
+    return existing, "updated"
+end
+
+function Bank:SaveCopy(index, section, category)
+    local id, result = self:SaveSlot(index, section, category)
+    if result ~= "linked" then
+        return id, result
+    end
+    local macro = Macros.Get(index)
+    local held = self:HeldIn(macro, section, category)
+    if held then
+        return held, "linked"
+    end
+    if macro.long and addon:IsInCombat() then
+        return nil, COMBAT_ERROR -- its slot may have to click the copy's button
+    end
+    local copied, copyResult = copyInto(id, section, category)
+    if not copied then
+        return nil, copyResult
+    end
+    -- The copy the tab prefers takes over: the keys, and a long slot (it
+    -- clicks one bank macro's button) clicks the copy's.
+    if preferred(macro.tab, { id, copied }) == copied then
+        if macro.long then
+            local record = db().macros[copied]
+            Macros.Write(index, macro.name, nil, slotBody(copied, record))
+        end
+        if addon.Keys then
+            addon.Keys:Hand("macro", id, copied)
+        end
+    end
+    return copied, copyResult
+end
+
 function Bank:SaveTab(tab, section, category)
     local placed, placeError = checkPlace(section, category)
     if not placed then
         return nil, placeError
     end
     -- By what the slots hold: saving a long one may rewrite (and move) it.
-    local saved = 0
+    local saved, already = 0, 0
     for _, macro in ipairs(Macros.List(tab)) do
         local index = Macros.Find(tab, macro.name, macro.body, macro.index)
-        local _, result = self:SaveSlot(index, section, category)
+        local _, result = self:SaveCopy(index, section, category)
         if result == "saved" or result == "updated" then
             saved = saved + 1
+        elseif result == "linked" then
+            already = already + 1
         end
     end
-    return saved
+    return saved, nil, already
 end
 
 -- A new slot for the record, whatever the tab holds.

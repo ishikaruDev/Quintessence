@@ -1660,7 +1660,7 @@ end
 --[[ Bank and slots ]]
 
 -- The selected slot's macro into the bank: `category` of the shown section
--- (nil: Unsorted).
+-- (nil: Unsorted). Already banked elsewhere, it is copied there.
 function BankUI:SaveToBank(category)
     if not self.selected then
         return
@@ -1670,7 +1670,7 @@ function BankUI:SaveToBank(category)
         return
     end
     self.busy = true
-    local id, result = Bank:SaveSlot(self.selected, self.section, category)
+    local id, result = Bank:SaveCopy(self.selected, self.section, category)
     self.busy = false
     if not id then
         self:SetStatus(result, ERROR_COLOR)
@@ -1776,15 +1776,19 @@ end
 
 function BankUI:SaveTabTo(category)
     self.busy = true
-    local saved, saveError = Bank:SaveTab(self.tab, self.section, category)
+    local saved, saveError, already = Bank:SaveTab(self.tab, self.section, category)
     self.busy = false
     if not saved then
         self:SetStatus(saveError, ERROR_COLOR)
         return
     end
     self:BankChanged()
-    self:SetStatus("Saved " .. saved .. (saved == 1 and " macro" or " macros") .. " to "
-        .. (category or Bank.UNSORTED) .. ".", OK_COLOR)
+    local status = "Saved " .. saved .. (saved == 1 and " macro" or " macros") .. " to "
+        .. (category or Bank.UNSORTED) .. "."
+    if already > 0 then
+        status = status .. " " .. already .. (already == 1 and " was" or " were") .. " already there."
+    end
+    self:SetStatus(status, OK_COLOR)
 end
 
 function BankUI:DeleteBankConfirmed(id)
@@ -1807,22 +1811,34 @@ local function menuOptions()
 end
 
 -- The shown section's categories, to pick one: choose(category or nil).
-function BankUI:OpenCategoryPicker(anchor, choose)
+-- held(category or nil), optional: those it is true for get a check mark.
+function BankUI:OpenCategoryPicker(anchor, choose, held)
     local items = {}
     for _, name in ipairs(Bank:Categories(self.section)) do
         items[#items + 1] = { text = name, func = function() choose(name) end }
     end
     items[#items + 1] = { text = DIM_COLOR .. Bank.UNSORTED .. "|r", func = function() choose(nil) end }
-    Menu:Open(items, anchor, menuOptions())
+    local options = menuOptions()
+    if held then
+        for _, item in ipairs(items) do
+            item.checked = held(item ~= items[#items] and item.text or nil) and true or nil
+        end
+        options.list = true
+    end
+    Menu:Open(items, anchor, options)
 end
 
--- "Bank" (by Save and Revert): where to.
+-- "Bank" (by Save and Revert): where to; the categories that already hold
+-- the macro are checked.
 function BankUI:OpenSaveMenu(anchor)
-    if not self.selected then
+    local macro = self.selected and Macros.Get(self.selected)
+    if not macro then
         return
     end
     self:OpenCategoryPicker(anchor, function(category)
         self:SaveToBank(category)
+    end, function(category)
+        return Bank:HeldIn(macro, self.section, category)
     end)
 end
 
