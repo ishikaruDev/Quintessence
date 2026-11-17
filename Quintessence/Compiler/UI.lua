@@ -17,8 +17,12 @@ local DRAFT_SOURCE = "#DEFAULT\n"
 -- Vertical space between the search box and the template list, so the
 -- list's scrollbar arrow never touches the search box.
 local LIST_TOP_GAP = 6
--- Vertical space between the editor's action buttons and the source box.
+-- Vertical space between the editor's dropdown row and the source box.
 local EDITOR_SECTION_GAP = 10
+-- Vertical space between the source box and the Preview-as row: its label's
+-- own padding adds about as much as the note line under the row, so the
+-- row sits evenly between the source and preview boxes.
+local PREVIEW_AS_GAP = 6
 -- Space between both columns' bottom edge and the window's bottom pipe
 -- (the content area already keeps clear of it; no Close button down there).
 local WINDOW_BOTTOM_GAP = 0
@@ -487,11 +491,31 @@ end
 -- "wmcAfterLayout" (cleared by AceGUI on release, so nothing leaks into the
 -- shared SimpleGroup pool); it runs after every layout, because Flow clears
 -- all anchors each time.
+-- Flow also counts half of each widget's height below the row's alignment
+-- line, which is too much for a labelled field (its line is below its
+-- centre: 51 instead of 42). A row that always fits on one line sets
+-- userdata "wmcOneRow" and is given its true height instead.
+local function oneRowHeight(children)
+    local line, bottom = 0, 0
+    for _, child in ipairs(children) do
+        local height = child.frame.height or child.frame:GetHeight() or 0
+        line = math.max(line, child.alignoffset or (height / 2))
+    end
+    for _, child in ipairs(children) do
+        local height = child.frame.height or child.frame:GetHeight() or 0
+        bottom = math.max(bottom, line - (child.alignoffset or (height / 2)) + height)
+    end
+    return bottom
+end
+
 if AceGUI.GetLayout and AceGUI.RegisterLayout and AceGUI:GetLayout("Flow") then
     local flow = AceGUI:GetLayout("Flow")
     AceGUI:RegisterLayout("WMC-Flow", function(content, children)
         flow(content, children)
         local owner = content.obj
+        if owner and owner.GetUserData and owner:GetUserData("wmcOneRow") and owner.LayoutFinished then
+            owner:LayoutFinished(nil, oneRowHeight(children))
+        end
         local after = owner and owner.GetUserData and owner:GetUserData("wmcAfterLayout")
         if after then
             after()
@@ -2260,12 +2284,6 @@ function UI:DrawEditor(template)
     self.draftCategory = template.category
     self.cleanName = template.name or ""
     self.cleanSource = template.source or ""
-    -- The checkbox's alignoffset is ours: clear it before the widget goes
-    -- back to its pool (WMC-CheckBox resets it on acquire too).
-    if self.enabledBox then
-        self.enabledBox.alignoffset = nil
-        self.enabledBox = nil
-    end
     -- Same for the edit boxes whose height was matched to a button.
     restoreEditBoxHeight(self.nameBox)
     restoreEditBoxHeight(self.previewAsBox)
@@ -2297,7 +2315,7 @@ function UI:DrawEditor(template)
 
     local nameBox = AceGUI:Create("WMC-EditBox")
     nameBox:SetLabel("Button name  (/click WMC_" .. (template.name or "") .. ")")
-    nameBox:SetWidth(246)
+    nameBox:SetWidth(268)
     nameBox:SetText(template.name or "")
     nameBox:SetCallback("OnTextChanged", function(_, _, value)
         if self.editing then
@@ -2315,54 +2333,43 @@ function UI:DrawEditor(template)
     nameRow:AddChild(nameBox)
     self.nameBox = nameBox
 
-    local saveButton = makeButton(template.isDraft and "Create" or "Save", 100, function() self:SaveSelected() end)
-    alignWithEditBox(saveButton, nameBox)
-    nameRow:AddChild(saveButton)
+    -- Save, Duplicate and Export; the box and buttons end where the
+    -- Preview-as row's Live button does (612).
+    local saveButton = makeButton(template.isDraft and "Create" or "Save", 96, function() self:SaveSelected() end)
+    local duplicateButton = makeButton("Duplicate", 96, function() self:DuplicateSelected() end)
+    local exportButton = makeButton("Export", 96, function() self:ExportSelected() end)
+    local rowButtons = { saveButton, duplicateButton, exportButton }
+    self.actionButtons = { duplicateButton, exportButton }
+    for _, button in ipairs(rowButtons) do
+        alignWithEditBox(button, nameBox)
+        nameRow:AddChild(button)
+    end
+    for _, button in ipairs(self.actionButtons) do
+        button:SetDisabled(template.isDraft and true or false)
+    end
     self.nameRow = nameRow
     self.saveButton = saveButton
-
-    local enabledBox = AceGUI:Create("WMC-CheckBox")
-    enabledBox:SetLabel("Enabled")
-    enabledBox:SetWidth(90)
-    enabledBox:SetValue(template.enabled ~= false)
-    enabledBox:SetCallback("OnValueChanged", function(_, _, value)
-        self.enabledValue = value and true or false
-        -- A saved template is enabled/disabled right away (like the
-        -- Category dropdown); a draft keeps the choice for "Create".
-        if not self.editingDraft and self.selectedName then
-            local ok, errorMessage = addon:SetTemplateEnabled(self.selectedScope, self.selectedName, self.enabledValue)
-            if not ok then
-                self:SetStatus("Error: " .. errorMessage, ERROR_COLOR)
-            end
-            self:RefreshSelected()
-        end
-    end)
-    -- The checkbox square (and its label) is centred on the name box too,
-    -- i.e. level with Save's text.
-    alignWithEditBox(enabledBox, nameBox)
-    nameRow:AddChild(enabledBox)
-    self.enabledBox = enabledBox
-    self.enabledValue = template.enabled ~= false
-    -- Save is glued to the name box's visible box after every layout
-    -- (anchorToBox), Enabled right after it; their Flow offsets above are
-    -- only estimates for the row's height. The job just makes the box a
-    -- button's height (24).
+    -- Each button is glued to the name box's visible box after every layout
+    -- (anchorToBox); their Flow offsets above are only estimates for the
+    -- row's height. The job just makes the box a button's height (24).
+    nameRow:SetUserData("wmcOneRow", true)
     nameRow:SetUserData("wmcAfterLayout", function()
-        anchorToBox(nameBox, { saveButton }, enabledBox)
+        anchorToBox(nameBox, rowButtons)
     end)
-    anchorToBox(nameBox, { saveButton }, enabledBox)
+    anchorToBox(nameBox, rowButtons)
     self.alignJob = { editBox = nameBox, boxHeight = 24 }
     scheduleAlignment(self.alignJob, self.previewAlignJob)
 
     local metaRow = AceGUI:Create("SimpleGroup")
-    metaRow:SetLayout("Flow")
+    metaRow:SetLayout((AceGUI.GetLayout and AceGUI:GetLayout("WMC-Flow")) and "WMC-Flow" or "Flow")
+    metaRow:SetUserData("wmcOneRow", true)
     metaRow:SetFullWidth(true)
     self.editor:AddChild(metaRow)
     stripGroupSkin(metaRow)
 
     local categoryDropdown = AceGUI:Create("WMC-Dropdown")
     categoryDropdown:SetLabel("Category")
-    categoryDropdown:SetWidth(200)
+    categoryDropdown:SetWidth(185)
     local categoryList, categoryOrder = self:BuildCategoryList()
     categoryDropdown:SetList(categoryList, categoryOrder)
     categoryDropdown:SetValue(template.category or NO_CATEGORY)
@@ -2381,7 +2388,7 @@ function UI:DrawEditor(template)
     -- Move a saved template to another class (or GENERAL).
     local moveDropdown = AceGUI:Create("WMC-Dropdown")
     moveDropdown:SetLabel("Move to")
-    moveDropdown:SetWidth(170)
+    moveDropdown:SetWidth(185)
     local moveList, moveOrder = {}, {}
     for _, class in ipairs(CLASS_ORDER) do
         moveList[class] = classLabel(class)
@@ -2395,24 +2402,31 @@ function UI:DrawEditor(template)
     end)
     metaRow:AddChild(moveDropdown)
     self.moveDropdown = moveDropdown
+    metaRow:AddChild(makeGap(16))
 
-    local actionRow = AceGUI:Create("SimpleGroup")
-    actionRow:SetLayout("Flow")
-    actionRow:SetFullWidth(true)
-    self.editor:AddChild(actionRow)
-    stripGroupSkin(actionRow)
-    local duplicateButton = makeButton("Duplicate", 110, function() self:DuplicateSelected() end)
-    local exportButton = makeButton("Export", 110, function() self:ExportSelected() end)
-    self.actionButtons = { duplicateButton, exportButton }
-    for index, button in ipairs(self.actionButtons) do
-        button:SetDisabled(template.isDraft and true or false)
-        if index > 1 then
-            actionRow:AddChild(makeGap(BUTTON_GAP + 2))
+    local enabledBox = AceGUI:Create("WMC-CheckBox")
+    enabledBox:SetLabel("Enabled")
+    enabledBox:SetWidth(90)
+    enabledBox:SetValue(template.enabled ~= false)
+    enabledBox:SetCallback("OnValueChanged", function(_, _, value)
+        self.enabledValue = value and true or false
+        -- A saved template is enabled/disabled right away (like the
+        -- Category dropdown); a draft keeps the choice for "Create".
+        if not self.editingDraft and self.selectedName then
+            local ok, errorMessage = addon:SetTemplateEnabled(self.selectedScope, self.selectedName, self.enabledValue)
+            if not ok then
+                self:SetStatus("Error: " .. errorMessage, ERROR_COLOR)
+            end
+            self:RefreshSelected()
         end
-        actionRow:AddChild(button)
-    end
+    end)
+    -- No alignoffset: Flow then centres the checkbox on the row's line,
+    -- which is the dropdowns' field centre (not their labels').
+    metaRow:AddChild(enabledBox)
+    self.enabledBox = enabledBox
+    self.enabledValue = template.enabled ~= false
 
-    -- Breathing room between the action buttons and the source tab.
+    -- Breathing room between the dropdowns and the source tab.
     self.editor:AddChild(makeSpacer(EDITOR_SECTION_GAP))
 
     -- "TEMPLATE SOURCE" tab and the All / Base / mode tabs, right on top of
@@ -2439,7 +2453,7 @@ function UI:DrawEditor(template)
     self.highlightKey = nil
     self:LoadSource(template.source or "")
 
-    self.editor:AddChild(makeSpacer(EDITOR_SECTION_GAP))
+    self.editor:AddChild(makeSpacer(PREVIEW_AS_GAP))
 
     -- Preview-As (§13.5): a state to simulate, in condition syntax. Empty
     -- means the live state. Per editor session: every redraw starts empty.
@@ -2449,6 +2463,7 @@ function UI:DrawEditor(template)
     self.previewLabelText = nil
     local asRow = AceGUI:Create("SimpleGroup")
     asRow:SetLayout((AceGUI.GetLayout and AceGUI:GetLayout("WMC-Flow")) and "WMC-Flow" or "Flow")
+    asRow:SetUserData("wmcOneRow", true)
     asRow:SetFullWidth(true)
     stripGroupSkin(asRow)
     self.editor:AddChild(asRow)
